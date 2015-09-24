@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset='utf-8' />
+  </head>
+  <body onkeydown='send_key(event);'>
+    <canvas height='816' width='816' id='main'></canvas>
+    <script>
+      var socket = new WebSocket('<%= "ws://zuush.tk:#{port}" %>');
+      
+      var context = document.getElementById('main').getContext('2d');
+      context.font = '16px monospace';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+
+      var cell_size = 16;
+      var half_cell_size = 8;
+      
+      socket.onopen = function() {
+        socket.send('refresh');
+      }
+      socket.onmessage = function(event) {
+        render(event.data);
+      }
+      socket.onclose = function() {
+        context.fillStyle = 'black';
+        context.fillRect(0, 0, cell_size * 51, cell_size * 51);
+        context.fillStyle = '#eee';
+        context.fillText('Соединение закрыто :(', cell_size * 25.5, cell_size * 25.5);
+      }
+
+      function render(data) {
+        var len = data.length;
+        var r = 0, c = 0;
+        context.fillStyle = 'black';
+        context.fillRect(0, 0, cell_size * 51, cell_size * 51);
+        
+        context.fillStyle = '#eee';
+        for(var i = 0; i < len; i++) {
+          chr = data[i];
+          if (chr == "\n") {
+            r++;
+            c = 0;
+          } else {
+            context.fillText(chr, c * cell_size + half_cell_size, r * cell_size + half_cell_size);
+            c++;
+          }
+        }
+      }
+      
+      function send_key(event) {
+        socket.send('key,' + event.which.toString())
+      }
+    </script>
+  </body>
+</html>

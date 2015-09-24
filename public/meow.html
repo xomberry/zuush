@@ -1,0 +1,16 @@
+<body style="text-align: center">
+  <h2 id="phrase" onclick="update_phrase()" style="top: 40%; width: 100%; position: absolute; cursor: pointer;"></h2>
+  <script>
+    function update_phrase() {
+      xmlhttp = new XMLHttpRequest();
+      xmlhttp.onreadystatechange = function() {
+        if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+          document.getElementById("phrase").innerHTML = xmlhttp.responseText;
+        }
+      }
+      xmlhttp.open("GET", "meow/get", true);
+      xmlhttp.send();
+    }
+    update_phrase();
+  </script>
+</body>
