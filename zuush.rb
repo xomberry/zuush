@@ -1,29 +1,38 @@
 require 'sinatra/base'
-require 'sqlite3'
+require 'data_mapper'
 require 'fileutils'
 require_relative 'rack_cp_fix'
 require_relative 'meow'
 
 class Zuush < Sinatra::Application
+  HOST = "zuush.tk"
+
   Dir.chdir __dir__
   FileUtils.mkpath 'files'
   FileUtils.mkpath 'db'
   FileUtils.mkpath 'public'
 
-  DB = SQLite3::Database.new 'db/quu.db', results_as_hash: true
-  DB.execute <<-SQL
-    create table if not exists ShortLinks (
-      short  text primary key not null,
-      long   text not null,
-      key    text not null,
-      k      text not null,
-      ts     text not null,
-      id_num int not null,
-      url    text not null,
-      hits   int not null default 0
-    );
-  SQL
-    
+  DataMapper.setup(:default, "sqlite://#{__dir__}/db/zuu.db")
+
+  class UploadedFile
+    include DataMapper::Resource
+
+    property :id,             Serial
+    property :file_name,      String, unique: true
+    property :short_link,     String, unique: true
+    property :short_link_key, String
+    property :user_key,       String
+    property :timestamp,      Time
+    property :url,            String, format: :url
+    property :hits,           Integer, required: true, default: 0
+
+    Lock = Mutex.new
+  end
+
+  DataMapper.finalize
+  DataMapper.auto_upgrade!    
+
+
   set bind: '0.0.0.0', port: 80, static: false, threaded: false
   
   post '/api/up' do
@@ -34,9 +43,10 @@ class Zuush < Sinatra::Application
     k = request.POST['k']
     return 400 if k.nil?
     
-    response = ['0']
-    DB.execute "select id_num, ts, url, long, hits from ShortLinks where Key = ? order by TS desc limit 10", k do |row|
-      response += row.values.join ','
+    response = ["0"]
+    last_10_uploads = UploadedFile.all(user_key: k, limit: 10, order: [:timestamp.desc])
+    last_10_uploads.each do |file|
+      response << "#{file.id},#{file.timestamp},#{file.url},#{file.file_name},#{file.hits}"
     end
     response.join "\n"
   end
@@ -47,14 +57,6 @@ class Zuush < Sinatra::Application
 
   get '/f/*' do |shortlink|
     uploaded_file(shortlink[/[A-Za-zА-Яа-я_]*/])
-  end
-  
-  get '/twp' do
-    erb :twp, locals: {port: '6688'}
-  end
-
-  get '/twp/test' do
-    erb :twp, locals: {port: '4525'}
   end
   
   get '/meow/get' do
@@ -90,15 +92,15 @@ class Zuush < Sinatra::Application
   
   def uploaded_file(shortlink, key = nil)
     logger.info shortlink
-    row = DB.execute('select key, long from ShortLinks where short = ? limit 1', shortlink)[0]
-    return not_found if row.nil?
 
-    file_key = row['key']
-    return 403 if file_key && key != file_key
+    file = UploadedFile.first(short_link: shortlink)
+    return not_found if file.nil?
 
-    long = row['long']
-    path = "files/#{long}"
-    DB.execute 'update shortlinks set hits = hits + 1 where short = ?', shortlink
+    return 403 if file.short_link_key && key != file.short_link_key
+
+    path = "files/#{file.file_name}"
+    file.hits += 1
+    file.save
     
     file_response(path)
   end
@@ -137,19 +139,20 @@ class Zuush < Sinatra::Application
     
     FileUtils.copy tempfile.path, "files/#{filename}"
     tempfile.delete
-    
-    num = DB.execute('select count(*) as num from ShortLinks')[0]['num']
-    shortlink = num2word(num)
-    ext = File.extname(filename)
-    key = num2word(rand(1_000..9999)).gsub(/./) {|ch| [ch.tr('aehilost', '43411057'), ch.upcase, ch].sample}
-    client_ip = request.ip
-    host = 'zuush.tk'
-    
-    url = "http://#{host}/f/#{key}/#{shortlink+ext}"
 
-    DB.execute 'insert into ShortLinks (short, long, key, k, ts, id_num, url) values (?, ?, ?, ?, ?, ?, ?)', [shortlink, filename, key, k, Time.now.to_s, num, url]
-    
-    "0,#{url},0,0"
+    file = UploadedFile.new
+    UploadedFile::Lock.synchronize do
+      file.short_link = num2word(UploadedFile.count)
+      file.file_name = filename
+      file.short_link_key = num2word(rand(1_000..9_999)).gsub(/./) {|ch| [ch.tr('aehilost', '43411057'), ch.upcase, ch].sample}
+      file.user_key = k
+      file.timestamp = Time.now
+      ext = File.extname(filename)
+      file.url = "http://#{HOST}/f/#{file.short_link_key}/#{file.short_link+ext}"
+      file.save
+    end
+
+    "0,#{file.url},0,0"
   end
 end
 
