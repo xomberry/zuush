@@ -16,6 +16,7 @@ class Zuush < Sinatra::Application
       short  text primary key not null,
       long   text not null,
       key    text not null,
+      k      text not null,
       ts     text not null,
       id_num int not null,
       url    text not null,
